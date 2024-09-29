@@ -65,12 +65,7 @@ jobs:
           fi
 
       - name: Build Docker image
-        run: docker build --file ./Dockerfile --tag ${{ secrets.DOCKER_USERNAME }}/ai-cli:${{ github.sha }} .
+        run: docker build --file ./Dockerfile --tag ${{ secrets.DOCKER_USERNAME }}/ai-cli:${{ env.tag }} .
 
       - name: Push Docker image
-        run: docker push ${{ secrets.DOCKER_USERNAME }}/ai-cli:${{ github.sha }}
-
-      - name: Tag Docker image
-        run: |
-          docker tag ${{ secrets.DOCKER_USERNAME }}/ai-cli:${{ github.sha }} ${{ secrets.DOCKER_USERNAME }}/ai-cli:${{ env.tag }}
-          docker push ${{ secrets.DOCKER_USERNAME }}/ai-cli:${{ env.tag }}
+        run: docker push ${{ secrets.DOCKER_USERNAME }}/ai-cli:${{ env.tag }}
