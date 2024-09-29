@@ -21,7 +21,7 @@
 You can install the binary directly by running the following command:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/rohitlohar45/ai-cli/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/rohitlohar45/ai-cli/master/install.sh | bash
 ```
 
 ## 🛠 Build from Source
