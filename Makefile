@@ -1,7 +1,7 @@
 APP_NAME = ai-cli
 VERSION = 1.0.0
 PLATFORMS = linux/amd64 windows/amd64 darwin/amd64
-DOCKER_IMAGE = your-docker-username/$(APP_NAME)
+DOCKER_IMAGE = loharrohit/$(APP_NAME)
 
 build:
 	@mkdir -p dist
@@ -29,5 +29,12 @@ test:
 fmt:
 	@go fmt ./...
 
-release: clean build docker-build
-	@echo "Release $(VERSION) prepared for $(APP_NAME)"
+tag-release:
+	@git tag -a v$(VERSION) -m "Release version $(VERSION)"
+	@git push origin v$(VERSION)
+
+release: clean build docker-build tag-release
+	@docker tag $(DOCKER_IMAGE):$(VERSION) $(DOCKER_IMAGE):latest
+	@docker push $(DOCKER_IMAGE):$(VERSION)
+	@docker push $(DOCKER_IMAGE):latest
+	@echo "Release $(VERSION) complete for $(APP_NAME)"
