@@ -1,40 +1,52 @@
 package main
 
 import (
+	"ai-cli/config"
 	"ai-cli/internal/history"
 	"fmt"
 	"log"
 	"os"
-	"runtime"
+	"os/exec"
 	"strings"
 )
 
-var (
-	apiKey        string
-	model         string
-	temperature   float64
-	maxTokens     int
-	ollamaBaseURL string
-	osType        string
-	useOllama     bool
-)
+func getOllamaStatus() (bool, error) {
+	cmd := exec.Command("docker", "ps", "--filter", "publish=11434", "--format", "{{.ID}}")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("failed to check docker status: %v", err)
+	}
 
-func init() {
-	apiKey = os.Getenv("OPENAI_API_KEY")
-	model = "codellama"
-	temperature = 0.7
-	maxTokens = 1000
-	ollamaBaseURL = "http://localhost:11434"
-	osType = runtime.GOOS
-	useOllama = true
+	if strings.TrimSpace(string(output)) == "" {
+		return false, nil
+	}
+
+	return true, nil
 }
 
 func main() {
+	config.InitConfig()
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: ai-cli <subcommand> [options] or ai-cli \"<input command>\"")
 		os.Exit(1)
 	}
 
+	var modelError error
+
+	if config.ApiKey == "" {
+		status, err := getOllamaStatus()
+
+		if err != nil {
+			log.Fatalf("Error checking Ollama status: %v", err)
+			modelError = fmt.Errorf("Error checking Ollama status: %v", err)
+		}
+
+		if status {
+			config.UseOllama = true
+		} else {
+			modelError = fmt.Errorf("OpenAI API key is not set and Ollama is not running on the port 11434")
+		}
+	}
 	switch os.Args[1] {
 	case "set-api-key":
 		handleSetAPIKey(os.Args[2:])
@@ -53,6 +65,11 @@ func main() {
 	case "help":
 		printHelp()
 	default:
+
+		if modelError != nil {
+			log.Fatal(modelError)
+		}
+
 		input := strings.Join(os.Args[1:], " ")
 		command, err := processInput(input)
 		if err != nil {

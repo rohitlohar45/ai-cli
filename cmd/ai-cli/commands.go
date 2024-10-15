@@ -1,6 +1,7 @@
 package main
 
 import (
+	"ai-cli/config"
 	"ai-cli/internal/history"
 	internal "ai-cli/internal/spinner"
 	"ai-cli/utils"
@@ -23,26 +24,20 @@ import (
 )
 
 func processInput(input string) (string, error) {
-	llmPrompt := fmt.Sprintf(`You are a helpful assistant that converts natural language instructions into command line instructions.
-1. Your output should only include the command line instruction, nothing else.
-2. Provide the command in the correct format for %s, ensuring it is syntactically correct and executable.
-3. Include specific arguments or options as necessary.
-4. Do not include unnecessary explanations or additional text.
-5. Task: "%s"
-Return the command without any extra formatting.`, osType, input)
-
 	internal.StartSpinner()
 	defer internal.StopSpinner()
 
-	if useOllama {
-		return sendOllamaRequest(llmPrompt)
-	}
-	return sendOpenAIRequest(llmPrompt)
+	return utils.FetchLLMResponse(input, utils.AIModel(config.Model))
+
+	// if useOllama {
+	// 	return sendOllamaRequest(llmPrompt)
+	// }
+	// return sendOpenAIRequest(llmPrompt)
 }
 
-func sendOllamaRequest(prompt string) (string, error) {
-	url := fmt.Sprintf("%s/api/generate", ollamaBaseURL)
-	data := map[string]string{"model": model, "prompt": prompt}
+func SendOllamaRequest(prompt string) (string, error) {
+	url := fmt.Sprintf("%s/api/generate", config.OllamaBaseURL)
+	data := map[string]string{"model": config.Model, "prompt": prompt}
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal request: %w", err)
@@ -72,15 +67,15 @@ func sendOllamaRequest(prompt string) (string, error) {
 	return strings.TrimSpace(fullResponse), nil
 }
 
-func sendOpenAIRequest(input string) (string, error) {
-	client := openai.NewClient(apiKey)
+func SendOpenAIRequest(input string) (string, error) {
+	client := openai.NewClient(config.ApiKey)
 
 	resp, err := client.CreateChatCompletion(
 		context.Background(),
 		openai.ChatCompletionRequest{
-			Model:       model,
-			Temperature: float32(temperature),
-			MaxTokens:   maxTokens,
+			Model:       config.Model,
+			Temperature: float32(config.Temperature),
+			MaxTokens:   config.MaxTokens,
 			Messages: []openai.ChatCompletionMessage{
 				{Role: openai.ChatMessageRoleUser, Content: input},
 			},
@@ -189,13 +184,55 @@ func handleSetAPIKey(args []string) {
 	var newAPIKey string
 	fs.StringVar(&newAPIKey, "key", "", "Set OpenAI API Key")
 	fs.Parse(args)
+
+	fmt.Println("Setting API Key...", args)
+
 	if newAPIKey != "" {
-		apiKey = newAPIKey
-		useOllama = false
-		fmt.Printf("API Key set. Using OpenAI model: %s\n", model)
+		config.ApiKey = newAPIKey
+		os.Setenv("OPENAI_API_KEY", newAPIKey)
+
+		err := persistAPIKey(newAPIKey)
+		if err != nil {
+			fmt.Printf("Failed to save API Key persistently: %v\n", err)
+			return
+		}
+
+		fmt.Println("API Key has been set and saved persistently.")
 	} else {
-		fmt.Println("Please provide a valid API key.")
+		fmt.Println("Please provide a valid API key. in the format: ai-cli set-api-key --key <API_KEY>")
 	}
+}
+
+func persistAPIKey(apiKey string) error {
+	usr, err := user.Current()
+	if err != nil {
+		return fmt.Errorf("unable to get current user: %v", err)
+	}
+
+	shell := os.Getenv("SHELL")
+	var profileFile string
+	if strings.Contains(shell, "bash") {
+		profileFile = ".bashrc"
+	} else if strings.Contains(shell, "zsh") {
+		profileFile = ".zshrc"
+	} else {
+		profileFile = ".profile"
+	}
+
+	profilePath := filepath.Join(usr.HomeDir, profileFile)
+
+	f, err := os.OpenFile(profilePath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("unable to open shell profile: %v", err)
+	}
+	defer f.Close()
+
+	exportCommand := fmt.Sprintf("\nexport OPENAI_API_KEY=\"%s\"\n", apiKey)
+	if _, err = f.WriteString(exportCommand); err != nil {
+		return fmt.Errorf("unable to write API key to profile: %v", err)
+	}
+
+	return nil
 }
 
 func handleSetModel(args []string) {
@@ -204,10 +241,10 @@ func handleSetModel(args []string) {
 	fs.StringVar(&newModel, "model", "", "Set model (gpt-3.5-turbo, gpt-4, codellama)")
 	fs.Parse(args)
 	if newModel != "" {
-		model = newModel
-		useOllama = (newModel == "codellama")
-		fmt.Printf("Model set to: %s\n", model)
-		if !useOllama && apiKey == "" {
+		config.Model = newModel
+		config.UseOllama = (newModel == "codellama")
+		fmt.Printf("Model set to: %s\n", config.Model)
+		if !config.UseOllama && config.ApiKey == "" {
 			fmt.Println("Warning: API Key is required for OpenAI models. Use 'set-api-key' command to set it.")
 		}
 	} else {
@@ -217,16 +254,16 @@ func handleSetModel(args []string) {
 
 func handleSetTemperature(args []string) {
 	fs := flag.NewFlagSet("set-temperature", flag.ExitOnError)
-	fs.Float64Var(&temperature, "temp", 0.7, "Set temperature (between 0.0 and 1.0)")
+	fs.Float64Var(&config.Temperature, "temp", 0.7, "Set temperature (between 0.0 and 1.0)")
 	fs.Parse(args)
-	fmt.Printf("Temperature set to: %f\n", temperature)
+	fmt.Printf("Temperature set to: %f\n", config.Temperature)
 }
 
 func handleSetMaxTokens(args []string) {
 	fs := flag.NewFlagSet("set-max-tokens", flag.ExitOnError)
-	fs.IntVar(&maxTokens, "max-tokens", 1000, "Set maximum number of tokens")
+	fs.IntVar(&config.MaxTokens, "max-tokens", 1000, "Set maximum number of tokens")
 	fs.Parse(args)
-	fmt.Printf("Max tokens set to: %d\n", maxTokens)
+	fmt.Printf("Max tokens set to: %d\n", config.MaxTokens)
 }
 
 func handleSetOllama(args []string) {
@@ -235,9 +272,9 @@ func handleSetOllama(args []string) {
 	fs.StringVar(&newOllamaURL, "url", "", "Set Ollama base URL")
 	fs.Parse(args)
 	if newOllamaURL != "" {
-		ollamaBaseURL = newOllamaURL
-		useOllama = true
-		fmt.Printf("Using Ollama URL: %s\n", ollamaBaseURL)
+		config.OllamaBaseURL = newOllamaURL
+		config.UseOllama = true
+		fmt.Printf("Using Ollama URL: %s\n", config.OllamaBaseURL)
 	} else {
 		fmt.Println("Please provide a valid Ollama URL.")
 	}
@@ -246,11 +283,11 @@ func handleSetOllama(args []string) {
 func printHelp() {
 	fmt.Println("Usage: ai-cli <subcommand> [options] or ai-cli \"<input command>\"")
 	fmt.Println("\nSubcommands:")
-	fmt.Println("  set-api-key -key <API Key>: Set your OpenAI API key")
-	fmt.Println("  set-model -model <model>: Set the model (gpt-3.5-turbo, gpt-4, codellama)")
-	fmt.Println("  set-temperature -temp <value>: Set temperature (0.0 - 1.0)")
-	fmt.Println("  set-max-tokens -max-tokens <number>: Set maximum number of tokens")
-	fmt.Println("  set-ollama -url <Ollama URL>: Set Ollama base URL")
+	fmt.Println("  set-api-key --key <API Key>: Set your OpenAI API key")
+	fmt.Println("  set-model --model <model>: Set the model (gpt-3.5-turbo, gpt-4, codellama)")
+	fmt.Println("  set-temperature --temp <value>: Set temperature (0.0 - 1.0)")
+	fmt.Println("  set-max-tokens --max-tokens <number>: Set maximum number of tokens")
+	fmt.Println("  set-ollama --url <Ollama URL>: Set Ollama base URL")
 	fmt.Println("  show-history: Show command history")
 	fmt.Println("  clear-history: Clear command history")
 	fmt.Println("  help: Show this help message")
